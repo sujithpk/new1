@@ -1,0 +1,492 @@
+= Google Cloud Platform - IoT Demo
+
+:Author:    Patrick Steiner
+:Email:     patrick@steiner-buchholz.de
+:Date:      30.12.2017
+
+:toc: macro
+
+toc::[]
+
+== Purpose
+In this demo we will take a look at a sample way of doing IoT like tasks,
+mainly using the capabilities provided by https://cloud.google.com[Google Cloud Platform].
+
+In this case we will make use of
+
+ * https://cloud.google.com/iot-core/[Goolge Cloud IoT Core]
+ * https://cloud.google.com/pubsub/[Goolge Cloud PubSub]
+ * https://cloud.google.com/dataflow/[Goolge Cloud Dataflow]
+ * https://cloud.google.com/bigquery/[Goolge BigQuery]
+
+For the Device-Layer of this demo, we will make use of an ESP8266 microcontroller
+with a DHT22 to measure temperature and humidity.
+
+== Building a Sensor
+For this demo project, I will be using a https://en.wikipedia.org/wiki/NodeMCU[NodeMCU based on ESP8266]
+combined with a DHT22 sensor.
+
+I have wired the NodeMCU and DHT22 based on the following image
+
+image::pictures/breadboard.png[]
+
+To program the NodeMCU, I made use of https://mongoose-os.com/[Mongoose OS] a new system, which I was not aware of
+for my previous experiments. Up to now I'm not certain if this is an advantage
+to my previous method, as describe in a earlier https://github.com/PatrickSteiner/IoT_Sensor_Labs[project].
+Time will tell!
+
+[NOTE]
+====
+You will have to connect your NodeMCU to your computer via an USB cable.
+I have seen people use some cheap USB cable that was only designed to charge
+hardware and was missing the data-wires. So please make sure to use a proper
+cable.
+====
+
+=== Install Mongoose OS
+Please install Mongoose OS based on the description provided by https://mongoose-os.com/software.html[Mongoose OS].
+
+=== Start Mongoose OS
+Start Mongoose OS based on the instructions provided by them.
+
+In my case I needed to run the following command from a Command-Line
+
+```
+psteiner$ ~/.mos/bin/mos
+```
+
+Your browser should start with the Mongoose OS User-Interface
+
+image::pictures/start_mongoose.png[]
+
+=== Flash ESP8266
+
+Select the proper Port for your NodeMCU and connect Mongoose OS with your NodeMCU.
+
+image::pictures/connect_mongoose.png[]
+
+You can flash sample code to your ESP8266. Please do so, as we will be
+extending the sample code to do our bidding.
+
+image::pictures/flash_esp.png[]
+
+I will use the NodeJS based sample, but you can use the "C" demo as well.
+
+Last thing to do is to connect the ESP8266 with your WiFi.
+
+image::pictures/wifi_esp.png[]
+
+With the newly flashed firmware on the ESP8266 and the WiFi configured,
+you should see log-messages including your WiFi connection
+
+```
+[Dec 30 19:49:36.037] mgos_wifi_setup_sta  WiFi STA: Connecting to Steiner
+```
+
+as well as the ESP8266 creating and logging data
+
+```
+[Dec 30 19:52:06.776] Tick uptime: 150.851430 {"free_ram":36100,"total_ram":52032}
+[Dec 30 19:52:07.776] Tock uptime: 151.851113 {"free_ram":36100,"total_ram":52032}
+[Dec 30 19:52:08.776] Tick uptime: 152.851563 {"free_ram":36100,"total_ram":52032}
+```
+
+There is more features in the flashed code, but that is for you to discover!
+
+=== Changing the Demo Code
+As this demo is not about teaching NodeJS or ESP8266 programming, we will
+look into the basics of handling the Mongoose OS Web-UI.
+
+To do this, we will stop the Blinking of the ESP8266 LED.
+
+Make sure you are looking at the file `fs/index.js`
+
+image::pictures/change_code.png[]
+
+Find the following code segment and remove or comment it out
+
+```
+GPIO.set_mode(led, GPIO.MODE_OUTPUT);
+...
+let value = GPIO.toggle(led);
+```
+
+you will also have to adjust the following line, as `value` doesn't exist
+anymore.
+
+```
+print(value ? 'Tick' : 'Tock', 'uptime:', Sys.uptime(), getInfo());
+```
+
+There are more lines of code covering the Blink-LED, but for this intro
+exercise, this should suffice.
+
+After having changed the code, we obviously have to safe it.
+
+image::pictures/safe_code.png[]
+
+There are two options to update the code on the ESP8266, a slow and a faster one.
+
+Let's look at the faster one together, so you can find the other one yourself.
+
+All you need to do is to upload the updated code to the ESP8266
+
+image::pictures/code_upload.png[]
+
+In the Log-Window of Mongoose OS Web-UI you see the updated File being uploaded,
+and the ESP8266 being rebooted to start the new firmware.
+
+=== Update ESP8266 Sample code
+I have provided you with updates to the two needed source-files
+
+ * https://github.com/PatrickSteiner/Google_Cloud_IoT_Demo/blob/master/firmware/fs/init.js[fs/index.js]
+ * https://github.com/PatrickSteiner/Google_Cloud_IoT_Demo/blob/master/firmware/mos.yml[mos.yml]
+
+they are updates to the ones from the sample and are extended by code needed
+to read the data from the DHT22 sensor and output this instead of `free_ram` and
+`total_ram`.
+
+== Connecting to the Cloud
+
+=== Configure Google cloud
+Up until now the ESP8266 was programmed to send a jSON based message via MQTT
+to a MQTT-Broker, which didn't exist.
+
+We will be using capbilities provided by https://cloud.google.com[Google Cloud Platform] to provided
+
+* https://cloud.google.com/iot-core/[Goolge Cloud IoT Core]
+
+> Cloud IoT Core is a fully managed service that allows you to easily and securely connect, manage, and ingest data from millions of globally dispersed devices. Cloud IoT Core, in combination with other services on Google Cloud IoT platform, provides a complete solution for collecting, processing, analyzing, and visualizing IoT data in real time to support improved operational efficiency.
+
+* https://cloud.google.com/pubsub/[Goolge Cloud PubSub]
+
+> Cloud Pub/Sub is a simple, reliable, scalable foundation for stream analytics and event-driven computing systems. As part of Google Cloud’s stream analytics solution, the service ingests event streams and delivers them to Cloud Dataflow for processing and BigQuery for analysis as a data warehousing solution.
+
+To be able to use https://cloud.google.com[Google Cloud Platform], you will have to
+perform a few installation and configuration steps.
+
+* Install `gcloud` command for https://cloud.google.com[Google Cloud Platform], based
+on https://cloud.google.com/sdk/downloads[instructions provided by Google].
+* Install some Beta Features via
+```
+$ gcloud components install beta
+```
+* Login to Google Cloud and authenticate yourself
+```
+$ gcloud auth application-default login
+```
+* Create a project in Google Cloud
+```
+$ gcloud projects create YOUR_PROJECT_NAME
+```
+* Make the newly created project to your current project
+```
+$ gcloud config set project YOUR_PROJECT_NAME
+```
+
+=== Enable Billing
+To be able to make proper use of the Google Cloud features, we need to enable *billing* for the
+newly created project. To do so go to https://console.developers.google.com/project/<YOUR_PROJECT_NAME>/settings
+and link the project with your account.
+
+The above steps created a generic project in https://cloud.google.com[Google Cloud Platform]. The following
+steps will create needed artifacts for https://cloud.google.com/iot-core/[Goolge Cloud IoT Core] and https://cloud.google.com/pubsub/[Goolge Cloud PubSub]
+
+=== Manage Permissions
+* Allow IoT Core to publish messages in PubSub
+```
+$ gcloud projects add-iam-policy-binding YOUR_PROJECT_NAME --member=serviceAccount:cloud-iot@system.gserviceaccount.com --role=roles/pubsub.publisher
+```
+* Create a MQTT Topic in PubSub
+```
+$ gcloud beta pubsub topics create iot-topic
+```
+* We can also create a subscription to read messages from a topic.
+```
+$ gcloud beta pubsub subscriptions create --topic iot-topic iot-subscription
+```
+* Create a device registry in https://cloud.google.com/iot-core/[Goolge Cloud IoT Core] to manage
+devices.
+```
+$ gcloud beta iot registries create iot-registry --region europe-west1 --event-pubsub-topic=iot-topic
+```
+
+You can verify the above configuration steps by using the https://cloud.google.com[Google Cloud Platform] Web UI
+
+image::pictures/iot_core_start.png[]
+
+=== Enable Google Cloud APIs
+For many of the tasks we, or our code, will be performing in the next steps, we will
+have to enable https://console.cloud.google.com/apis[Google Cloud APIs].
+
+To do so click the `enable` link
+
+image::pictures/enable_api.png[]
+
+In the search-field enter `Google Compute` and select the found API
+
+image::pictures/enable_compute_api1.png[]
+
+Enable the identified API
+
+image::pictures/enable_compute_api2.png[]
+
+Please continue to do the same with the following APIs
+
+ * Dataflow
+ * Cloud Resource Manager
+ * Logging
+ * Storage
+ * BigQuery
+ * Pub/Sub
+ * ( Google Service Control API )
+
+=== Connect ESP8266 to Google cloud
+If you have followed me so far, you have an ESP8266 and something in https://cloud.google.com[Google Cloud Platform].
+Let's connect these two!
+
+As mentioned earlier, the ESP8266 is already prepared to send MQTT messages to a
+MQTT-Broker, so all we need to do is to make the ESP8266 aware of https://cloud.google.com[Google Cloud Platform] and
+our artifacts there. To do this, you will have to go into the `Terminal` part of
+the Mongoose OS Web UI
+
+image::pictures/mongoose_terminal.png[]
+
+There you need to enter and run the following command
+```
+mos gcp-iot-setup --gcp-project YOUR_PROJECT_NAME --gcp-region europe-west1 --gcp-registry YOUR_REGISTRY
+```
+this will register your ESP8266 with https://cloud.google.com/iot-core/[Goolge Cloud IoT Core] and
+will define the needed Environment-Variables so the ESP8266 will find the MQTT-Broker provided by https://cloud.google.com/pubsub/[Goolge Cloud PubSub]
+
+In the log-windows of Mongoose OS, you should see lines like
+
+```
+[Dec 31 13:13:23.144] mgos_mqtt_global_con MQTT connecting to mqtt.googleapis.com:8883
+[Dec 31 13:13:28.744] mgos_mqtt_ev         MQTT TCP connect ok (0)
+...
+[Dec 31 13:16:33.977] Published: 0 /devices/esp8266_D608CF/state -> {"hum":49.599998,"temp":25}
+```
+
+You can use the https://cloud.google.com/pubsub/[Goolge Cloud PubSub] Web-UI to verify that the MQTT messages have been received.
+
+* navigate to your https://console.cloud.google.com/iot/[Google Cloud IoT Core] console
+
+image::pictures/open_registry.png[]
+
+* click on your registered device. You should only see one at the moment!
+
+image::pictures/open_device.png[]
+
+* open the tab named `Configuration & state history`
+
+image::pictures/open_state_history.png[]
+
+You should see a list of received messages.
+
+image::pictures/list_of_messages.png[]
+
+If you click on an individual message, you can see it's content in `Base64` and `Text`
+
+image::pictures/message_received.png[]
+
+== Write received data to file
+If you followed the above steps, you should have seen data coming in via
+MQTT and being displayed in the https://console.cloud.google.com/iot/[Google Cloud IoT Core] Web UI.
+
+In the next step, we plan to take this data and write it into files. For this we
+will be making use of
+
+ * https://cloud.google.com/dataflow/[Google Cloud Dataflow]
+
+> Cloud Dataflow is a fully-managed service for transforming and enriching data in stream (real time) and batch (historical) modes with equal reliability and expressiveness
+
+ * https://cloud.google.com/storage/[Google Cloud Storage]
+
+> Google Cloud Storage is unified object storage for developers and enterprises, from live data serving to data analytics/ML to data archiving.
+
+==== Create space in Google Cloud Storage
+Please follow the next steps to create space in the https://cloud.google.com/storage/[Google Cloud Storage]
+
+* Enter the https://console.cloud.google.com/storage/[Cloud Storage Console]
+* Create a new *bucket*
+
+image::pictures/create_bucket.png[]
+
+* Define the name of the *bucket*, it's storage class and the region you want
+the data to be saved in.
+
+image::pictures/create_bucket2.png[]
+
+==== Create Google Dataflow flow
+In this section we will be creation a flow in https://cloud.google.com/dataflow/[Google Cloud Dataflow].
+It will be triggered by incoming MQTT Messages in https://console.cloud.google.com/cloudpubsub[Google Cloud Pub/Sub] and
+will write the received messages in their JSON format into files in https://cloud.google.com/storage/[Google Cloud Storage]
+
+I have provided you with a simple project, which you can use and build on. It's
+in the `dataflow/first-dataflow` directory of this https://github.com/PatrickSteiner/Google_Cloud_IoT_Demo/tree/master/dataflow/first-dataflow[Git Repo].
+
+The main codesegement is
+
+```
+public static void main(String[] args) {
+	  PubSubOptions options = PipelineOptionsFactory.fromArgs(args)
+			  										  .withValidation()
+			  										  .as(PubSubOptions.class);
+	  Pipeline p = Pipeline.create(options);
+
+	 p.apply(PubsubIO.readStrings().fromTopic(options.getPubSubTopic()))
+	  .apply(Window.<String>into(FixedWindows.of(Duration.standardMinutes(1))))
+	  .apply(TextIO.write().to(options.getOutput()).withWindowedWrites().withNumShards(1));
+
+
+	  p.run();
+  }
+```
+
+To compile and run the code enter the following commands
+
+```
+$ cd first-dataflow
+$ mvn compile exec:java -Dexec.mainClass=com.example.PubSubReader \
+                        -Dexec.args="--project=<Project Name> \
+                        --stagingLocation=<Bucket Name>/staging/ \
+                        --tempLocation=<Bucket Name>/temp \
+                        --output=<Bucket Name>/output/ \
+                        --pubSubTopic=<Name of created topic> \
+                        --runner=DataflowRunner \
+                        --region=europe-west1"
+```
+
+in my case it is
+
+```
+$ cd first-dataflow
+$ mvn compile exec:java -Dexec.mainClass=com.example.PubSubReader \
+                        -Dexec.args="--project=iot-demo-psteiner-2018 \
+                        --stagingLocation=gs://psteiner_iot_bucket/staging/ \
+                        --tempLocation=gs://psteiner_iot_bucket/temp \
+                        --output=gs://psteiner_iot_bucket/output/ \
+                        --pubSubTopic=projects/iot-demo-psteiner-2018/topics/iot-topic  \
+                        --runner=DataflowRunner \
+                        --region=europe-west1"
+```
+
+To verify that the messages have been processed there are multiple ways, e.g.
+you could look into the Dataflow or look into the bucket, to see if files have
+been created.
+
+== Write received data to BigQuery
+In the previous section we wrote the received data to files, now we will write
+it into a Database. Luckily Google Cloud has something for that as well!
+
+> https://cloud.google.com/bigquery/[Google BigQuery] is Google's serverless, highly scalable, low cost enterprise data warehouse designed to make all your data analysts productive.
+
+=== Create BigQuery Database
+Before we can write data to a https://cloud.google.com/bigquery/[Google BigQuery] Database,
+we need to create one.
+
+Please follow these steps to create the Database:
+
+* Login to the https://bigquery.cloud.google.com/welcome/[BigQuery Console]
+* Create a new dataset
+
+image::pictures/BigQuery_create1.png[]
+
+* Enter all relevant data for the new dataset
+
+image::pictures/BigQuery_create2.png[]
+
+* Create a table within the newly created dataset
+
+image::pictures/BigQuery_create3.png[]
+
+[NOTE]
+====
+Please also add a field "timestamp" of type 'timestamp' for my sample code to work!
+====
+
+=== Write to BigQuery Database
+
+The central code has been updated to this
+
+```
+public static void main(String[] args) {
+		PipelineOptionsFactory.register(PubSubOptions.class);
+		PubSubOptions options = PipelineOptionsFactory.fromArgs(args)
+			  										  .withValidation()
+			  										  .as(PubSubOptions.class);
+		Pipeline p = Pipeline.create(options);
+
+		String tableSpec = new StringBuilder()
+		        .append("iot-demo-psteiner-2018:")
+		        .append("iot_data.")
+		        .append("raw_data")
+		        .toString();
+
+		p.apply(PubsubIO.readStrings().fromTopic(options.getPubSubTopic()))
+		 .apply(ParDo.of(new FormatAsTableRowFn()))
+		 .apply(BigQueryIO.writeTableRows().to(tableSpec.toString())
+		          .withWriteDisposition(BigQueryIO.Write.WriteDisposition.WRITE_APPEND)
+		          .withCreateDisposition(BigQueryIO.Write.CreateDisposition.CREATE_NEVER));
+
+		p.run();
+	}
+```
+
+As you can see, besides creating the table-specs, we had to change
+the Dataflow Pipeline. We introduced a step, which took the JSON based
+ESP output and converts it into a BigQuery - TabeRow object. To do so, we make
+use of the `ParDo` Funktions of DataFlow and call a custom written function called
+`FormatAsTableRowFn`.
+
+[NOTE]
+====
+Don't forget to change 'tableSpec' to the name of your BigQuery Database name!
+====
+
+```
+.apply(ParDo.of(new FormatAsTableRowFn())
+```
+
+With the JSON String converted to TabeRow, we can write our data
+into the prepared BigQuery table.
+
+```
+.apply(BigQueryIO.writeTableRows().to(tableSpec.toString())
+             .withWriteDisposition(BigQueryIO.Write.WriteDisposition.WRITE_APPEND)
+             .withCreateDisposition(BigQueryIO.Write.CreateDisposition.CREATE_NEVER));
+```
+
+Run the new DataFlow Pipeline with
+
+```
+$ cd second-dataflow
+$ mvn compile exec:java -Dexec.mainClass=com.example.PubSubReader \
+                        -Dexec.args="--project=<Project Name> \
+                        --stagingLocation=<Bucket Name>/staging/ \
+                        --tempLocation=<Bucket Name>/temp \
+                        --output=<Bucket Name>/output/ \
+                        --pubSubTopic=<Name of created topic> \
+                        --runner=DataflowRunner \
+                        --region=europe-west1"
+```
+
+in my case it is
+
+```
+$ cd second-dataflow
+$ mvn compile exec:java -Dexec.mainClass=com.example.PubSubReader \
+                        -Dexec.args="--project=iot-demo-psteiner-2018 \
+                        --stagingLocation=gs://psteiner_iot_bucket/staging/ \
+                        --tempLocation=gs://psteiner_iot_bucket/temp \
+                        --output=gs://psteiner_iot_bucket/output/ \
+                        --pubSubTopic=projects/iot-demo-psteiner-2018/topics/iot-topic  \
+                        --runner=DataflowRunner \
+                        --region=europe-west1"
+```
+
+You can use https://bigquery.cloud.google.com[BigQuery's] Preview feature to take
+at look at the received data.
+
+image::pictures/view_bigquery_data.png[]
