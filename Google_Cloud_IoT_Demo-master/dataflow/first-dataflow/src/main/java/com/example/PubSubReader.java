@@ -33,18 +33,21 @@ public class PubSubReader {
 
 
 	public interface PubSubOptions extends PipelineOptions {
+		@Description("Path of the file to read from")
+		@Default.String("gs://apache-beam-samples/shakespeare/kinglear.txt")
+		String getInputFile();
+
+		void setInputFile(String value);
 
 		@Description("PubSub Topic to read data from")
-		@Default.String("projects/schrocken-205609/topics/my-device-events")
+		@Default.String("projects/iot-demo-psteiner-2018/topics/iot-topic")
 		String getPubSubTopic();
 		void setPubSubTopic(String pubsubTopic);
 		
 		@Description("Path of the file to write to")
-		@Default.String("my-bucks-data/output")
+		@Required
 		String getOutput();
 		void setOutput(String value);
-		
-		
 	}	
 	
 	
@@ -55,7 +58,7 @@ public class PubSubReader {
 	  Pipeline p = Pipeline.create(options);
 
 	 p.apply(PubsubIO.readStrings().fromTopic(options.getPubSubTopic()))
-	  .apply(Window.<String>into(FixedWindows.of(Duration.standardMinutes(3))))
+	  .apply(Window.<String>into(FixedWindows.of(Duration.standardMinutes(1))))
 	  .apply(TextIO.write().to(options.getOutput()).withWindowedWrites().withNumShards(1));
 
 	
