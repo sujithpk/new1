@@ -1,4 +1,4 @@
-/*
+*
  * Licensed to the Apache Software Foundation (ASF) under one
  * or more contributor license agreements.  See the NOTICE file
  * distributed with this work for additional information
@@ -40,7 +40,7 @@ public class PubSubReader {
 		void setInputFile(String value);
 
 		@Description("PubSub Topic to read data from")
-		@Default.String("projects/iot-demo-psteiner-2018/topics/iot-topic")
+		@Default.String("projects/My First Project/topics/newtop")
 		String getPubSubTopic();
 		void setPubSubTopic(String pubsubTopic);
 		
